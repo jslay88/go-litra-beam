@@ -1,0 +1,73 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "*.*.*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: [ '1.22.1' ]
+        os: [linux, windows]
+        include:
+          - os: linux
+            arch: amd64
+            goos: linux
+            goarch: amd64
+          - os: windows
+            arch: amd64
+            goos: windows
+            goarch: amd64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Install Dependencies
+        run: go mod tidy && sudo apt-get update && sudo apt-get install -y build-essential gcc-mingw-w64 libudev-dev
+
+      - name: Extract tag name
+        id: get_tag
+        run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Build Binary
+        env:
+          CGO_ENABLED: 1
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          unset CC
+          OUT_FILE=litra-ctl-${{ env.TAG_NAME }}-${{ matrix.os }}-${{ matrix.arch }}
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            CC="x86_64-w64-mingw32-gcc"
+            OUT_FILE="$OUT_FILE.exe"                                                                                                                                                 
+          fi
+          echo "OUT_FILE=${OUT_FILE}" >> $GITHUB_ENV
+          CC="$CC" go build -v -o $OUT_FILE ./cmd/litra-ctl
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.OUT_FILE }}
+          path: ${{ env.OUT_FILE }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: bin
+
+      - name: Create GitHub Release with Go Binaries
+        uses: softprops/action-gh-release@v1
+        with:
+          files: bin/*/*

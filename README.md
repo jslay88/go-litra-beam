@@ -39,8 +39,8 @@ litra-ctl -list  # List discovered lights by serial number and exit
 litra-ctl -on    # Turn on the light
 litra-ctl -off   # Turn off the light
 litra-ctl -on -brightness 100   # Turn on the light and set full brightness
-litra-ctl -brightness 50        # Set the brightness to 50% without chaning the on/off state.
-litra-ctl -temperature 3900     # Set the temperature to 3900K
+litra-ctl -brightness 50        # Set the brightness to 50% without changing the on/off state.
+litra-ctl -temperature 3900     # Set the temperature to 3900K without changing the on/off state.
 litra-ctl -on -brightness 100 -temperature-percent 100   # Turn on light, set full brightness, set temperature to 6700K
 litra-ctl -device de:ad:be:ef:4f:a9 -on -brightness 100  # Turn on light with serial number 'de:ad:be:ef:4f:a9' and set full brightness
 sudo litra-ctl -build-udev-rules -user $USER   # Build udev rules for current user. Requires root privileges.

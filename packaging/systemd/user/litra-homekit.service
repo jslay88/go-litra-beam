@@ -1,0 +1,11 @@
+[Unit]
+Description=Litra Beam HomeKit bridge
+After=bluetooth.target
+
+[Service]
+ExecStart=%h/.local/bin/litra-homekit
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

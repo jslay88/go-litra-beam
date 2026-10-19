@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -12,40 +13,62 @@ import (
 	"github.com/jslay88/go-litra-beam"
 )
 
+type cliOptions struct {
+	list               bool
+	device             string
+	on                 bool
+	off                bool
+	brightness         int
+	temperature        int
+	temperaturePercent int
+	pathsOnly          bool
+	status             bool
+	buildUdev          bool
+	user               string
+}
+
 const (
 	udevTemplate = `ACTION=="add", SUBSYSTEMS=="hidraw", RUN+="/bin/sh -c 'for i in $({{ .ExecutablePath }} -paths-only); do setfacl -m u:{{ .User }}:rw $i; done'", MODE="0660"`
 )
 
 func main() {
-	list := flag.Bool("list", false, "Lists the discovered lights by their serial numbers and their paths, then exit")
-	device := flag.String("device", "", "The device to control via serial number. If not defined, will default to the first light discovered")
-	on := flag.Bool("on", false, "Turn the LitraBeam on")
-	off := flag.Bool("off", false, "Turn the LitraBeam off, ignored if -on is used")
-	brightness := flag.Int("brightness", -1, "Set the brightness level (0-100)")
-	temperature := flag.Int("temperature", -1, "Set the color temperature using a Kelvin value (2700-6500)")
-	temperaturePercent := flag.Int("temperature-percent", -1, "Set the color temperature by percentage (0-100), ignored if -temperature is used")
-	pathsOutput := flag.Bool("paths-only", false, "Outputs just the device paths and exits. Useful for udev rules.")
-	buildUdev := flag.Bool("build-udev-rules", false, "Build and install udev rules, then exit (for Linux only).")
-	user := flag.String("user", "", "User to install udev rules for, usually $USER. Only used with -build-udev-rules (for Linux only).")
-
+	opts := cliOptions{
+		brightness:         -1,
+		temperature:        -1,
+		temperaturePercent: -1,
+	}
+	flag.BoolVar(&opts.list, "list", false, "Lists the discovered lights by their serial numbers and their paths, then exit")
+	flag.StringVar(&opts.device, "device", "", "The device to control via serial number. If not defined, will default to the first light discovered")
+	flag.BoolVar(&opts.on, "on", false, "Turn the Litra Beam on")
+	flag.BoolVar(&opts.off, "off", false, "Turn the Litra Beam off")
+	flag.IntVar(&opts.brightness, "brightness", -1, "Set the brightness level (0-100)")
+	flag.IntVar(&opts.temperature, "temperature", -1, "Set the color temperature using a Kelvin value (2700-6500)")
+	flag.IntVar(&opts.temperaturePercent, "temperature-percent", -1, "Set the color temperature by percentage (0-100)")
+	flag.BoolVar(&opts.pathsOnly, "paths-only", false, "Outputs just the device paths and exits")
+	flag.BoolVar(&opts.status, "status", false, "Print power, brightness, and color temperature")
+	if runtime.GOOS == "linux" {
+		flag.BoolVar(&opts.buildUdev, "build-udev-rules", false, "Build and install udev rules, then exit")
+		flag.StringVar(&opts.user, "user", "", "User to install udev rules for, usually $USER. Only used with -build-udev-rules")
+	}
 	flag.Parse()
 
-	var d *litra.Beam
+	if err := validateOptions(opts); err != nil {
+		log.Fatal(err)
+	}
 
-	if *buildUdev {
-		buildUdevRules(*user)
+	if opts.buildUdev {
+		buildUdevRules(opts.user)
 		os.Exit(0)
 		return
 	}
 
-	if !*list && !*pathsOutput && *device == "" &&
-		!*on && !*off && *brightness == -1 &&
-		*temperature == -1 && *temperaturePercent == -1 {
+	if !opts.list && !opts.pathsOnly && opts.device == "" && !opts.hasSetting() {
 		fmt.Println("No options provided. Discovering Litra Beams...")
-		*list = true
+		opts.list = true
 	}
 
-	if *list || *pathsOutput || *device == "" {
+	var d *litra.Beam
+	if opts.list || opts.pathsOnly || opts.device == "" {
 		devices, err := litra.GetLitraBeams()
 		if err != nil {
 			log.Fatalf("Error getting connected devices: %v", err)
@@ -53,8 +76,8 @@ func main() {
 		if len(devices) == 0 {
 			log.Fatalln("No Litra Beam devices found.")
 		}
-		if *list || *pathsOutput {
-			if *list {
+		if opts.list || opts.pathsOnly {
+			if opts.list {
 				printDeviceList(devices)
 			} else {
 				printPathsOnly(devices)
@@ -65,37 +88,80 @@ func main() {
 		d = devices[0]
 	} else {
 		var err error
-		d, err = litra.NewBeam(*device)
+		d, err = litra.NewBeam(opts.device)
 		if err != nil {
-			log.Fatalf("Error discovering device by serial number. Serial Number: %s, Error: %v", *device, err)
+			log.Fatalf("Error discovering device by serial number. Serial Number: %s, Error: %v", opts.device, err)
 		}
 	}
 
-	if *brightness >= 0 {
-		if err := d.SetBrightness(*brightness); err != nil {
+	if opts.brightness != -1 {
+		if err := d.SetBrightness(opts.brightness); err != nil {
 			log.Fatalf("Error setting brightness: %v", err)
 		}
 	}
 
-	if *temperature >= 2700 && *temperature <= 6500 {
-		if err := d.SetTemperature(*temperature); err != nil {
+	if opts.temperature != -1 {
+		if err := d.SetTemperature(opts.temperature); err != nil {
 			log.Fatalf("Error setting temperature: %v", err)
 		}
-	} else if *temperaturePercent >= 0 && *temperaturePercent <= 100 {
-		if err := d.SetTemperaturePercentage(*temperaturePercent); err != nil {
+	} else if opts.temperaturePercent != -1 {
+		if err := d.SetTemperaturePercentage(opts.temperaturePercent); err != nil {
 			log.Fatalf("Error setting temperature by percentage: %v", err)
 		}
 	}
 
-	if *on {
+	if opts.on {
 		if err := d.On(); err != nil {
 			log.Fatalf("Error turning on device: %v", err)
 		}
-	} else if *off {
+	} else if opts.off {
 		if err := d.Off(); err != nil {
 			log.Fatalf("Error turning off device: %v", err)
 		}
 	}
+
+	if opts.status {
+		printStatus(d)
+	}
+	_ = d.Close()
+}
+
+func (o cliOptions) hasSetting() bool {
+	return o.on || o.off || o.brightness != -1 || o.temperature != -1 || o.temperaturePercent != -1 || o.status
+}
+
+func validateOptions(o cliOptions) error {
+	if o.on && o.off {
+		return errors.New("-on and -off cannot be used together")
+	}
+	if o.temperature != -1 && o.temperaturePercent != -1 {
+		return errors.New("-temperature and -temperature-percent cannot be used together")
+	}
+	if o.temperature != -1 && (o.temperature < litra.MinTemperatureK || o.temperature > litra.MaxTemperatureK) {
+		return fmt.Errorf("-temperature must be from %d to %d, got %d", litra.MinTemperatureK, litra.MaxTemperatureK, o.temperature)
+	}
+	if o.temperaturePercent != -1 && (o.temperaturePercent < litra.MinBrightnessPercent || o.temperaturePercent > litra.MaxBrightnessPercent) {
+		return fmt.Errorf("-temperature-percent must be from %d to %d, got %d", litra.MinBrightnessPercent, litra.MaxBrightnessPercent, o.temperaturePercent)
+	}
+	if o.brightness != -1 && (o.brightness < litra.MinBrightnessPercent || o.brightness > litra.MaxBrightnessPercent) {
+		return fmt.Errorf("-brightness must be from %d to %d, got %d", litra.MinBrightnessPercent, litra.MaxBrightnessPercent, o.brightness)
+	}
+	if o.user != "" && !o.buildUdev {
+		return errors.New("-user can only be used with -build-udev-rules")
+	}
+	if o.buildUdev && (o.list || o.pathsOnly || o.device != "" || o.hasSetting()) {
+		return errors.New("-build-udev-rules cannot be combined with other options")
+	}
+	if o.list && o.pathsOnly {
+		return errors.New("-list and -paths-only cannot be used together")
+	}
+	if o.list && (o.device != "" || o.hasSetting()) {
+		return errors.New("-list cannot be combined with other options")
+	}
+	if o.pathsOnly && (o.device != "" || o.hasSetting()) {
+		return errors.New("-paths-only cannot be combined with other options")
+	}
+	return nil
 }
 
 func buildUdevRules(user string) {
@@ -143,6 +209,19 @@ func buildUdevRules(user string) {
 		log.Fatalf("Failed to write udev rules @ %s\n\nError %v\n", filename, err)
 	}
 	fmt.Printf("Wrote udev rules @ %s. Rule:\n%s\n", filename, out.String())
+}
+
+func printStatus(d *litra.Beam) {
+	state, err := d.State()
+	if err != nil {
+		log.Fatalf("Error reading device state: %v", err)
+	}
+	power := "off"
+	if state.On {
+		power = "on"
+	}
+	fmt.Printf("Serial Number: %s\nPower: %s\nBrightness: %d%% (%d lm)\nTemperature: %dK (%d%%)\n",
+		d.SerialNbr, power, state.Brightness, state.BrightnessLumens, state.Temperature, state.TemperaturePercent)
 }
 
 func printDeviceList(devices []*litra.Beam) {

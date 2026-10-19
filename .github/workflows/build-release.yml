@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: [ '1.22.1' ]
+        go-version: [ '1.27.2' ]
         os: [linux, windows]
         include:
           - os: linux
@@ -37,26 +37,27 @@ jobs:
         id: get_tag
         run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
-      - name: Build Binary
+      - name: Build Binaries
         env:
           CGO_ENABLED: 1
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
           unset CC
-          OUT_FILE=litra-ctl-${{ env.TAG_NAME }}-${{ matrix.os }}-${{ matrix.arch }}
+          SUFFIX=""
           if [ "${{ matrix.os }}" = "windows" ]; then
             CC="x86_64-w64-mingw32-gcc"
-            OUT_FILE="$OUT_FILE.exe"                                                                                                                                                 
+            SUFFIX=".exe"
           fi
-          echo "OUT_FILE=${OUT_FILE}" >> $GITHUB_ENV
-          CC="$CC" go build -v -o $OUT_FILE ./cmd/litra-ctl
+          mkdir -p dist
+          CC="$CC" go build -v -o "dist/litra-ctl-${{ env.TAG_NAME }}-${{ matrix.os }}-${{ matrix.arch }}${SUFFIX}" ./cmd/litra-ctl
+          CC="$CC" go build -v -o "dist/litra-homekit-${{ env.TAG_NAME }}-${{ matrix.os }}-${{ matrix.arch }}${SUFFIX}" ./cmd/litra-homekit
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.OUT_FILE }}
-          path: ${{ env.OUT_FILE }}
+          name: litra-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/*
 
   release:
     needs: build
